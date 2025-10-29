@@ -248,6 +248,10 @@ if "customer_accounts" not in st.session_state:
     )
 if "job_orders" not in st.session_state:
     st.session_state.job_orders = []  # basit liste
+if "converted_quotes" not in st.session_state:
+    st.session_state.converted_quotes = []
+if "quote_counter" not in st.session_state:
+    st.session_state.quote_counter = 0
 if "selected_customer" not in st.session_state:
     st.session_state.selected_customer = None
 if "labor_cost" not in st.session_state:
@@ -531,6 +535,67 @@ if menu.startswith("💰"):
                 use_container_width=True,
             )
 
+            st.divider()
+            convert_btn = st.button(
+                "✅ Müşteri onayı alındı • İş Emri Oluştur",
+                type="primary",
+                use_container_width=True,
+                key="quote_convert_btn",
+            )
+            if convert_btn:
+                if edited.empty:
+                    st.warning("Onaylanacak teklif kalemi bulunamadı.")
+                else:
+                    st.session_state.quote_counter += 1
+                    quote_id = f"TEKLIF-{st.session_state.quote_counter:04d}"
+                    job_id = f"JOB-{len(st.session_state.job_orders)+1:04d}"
+                    short_note = notes.strip() if isinstance(notes, str) else ""
+                    if short_note:
+                        original_note = short_note
+                        short_note = original_note[:140]
+                        if len(original_note) > 140:
+                            short_note += "…"
+                    else:
+                        short_note = f"{len(edited)} kalem • {grand_total:,.2f} ₺"
+
+                    st.session_state.job_orders.append(
+                        {
+                            "id": job_id,
+                            "requester": selected_customer,
+                            "desc": short_note,
+                            "prio": "Normal",
+                            "due": datetime.now().strftime("%Y-%m-%d"),
+                            "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "source": "Teklif",
+                            "quote_id": quote_id,
+                        }
+                    )
+
+                    st.session_state.converted_quotes.append(
+                        {
+                            "quote_id": quote_id,
+                            "job_id": job_id,
+                            "customer": selected_customer,
+                            "item_count": len(edited),
+                            "subtotal": total,
+                            "labor_cost": float(labor_cost or 0.0),
+                            "grand_total": grand_total,
+                            "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        }
+                    )
+
+                    st.session_state.cart_df = pd.DataFrame(
+                        columns=["code", "name", "unit", "qty", "price"]
+                    )
+                    st.session_state.purchase_df = pd.DataFrame(
+                        columns=["code", "name", "unit", "needed_qty"]
+                    )
+                    st.session_state.labor_cost = 0.0
+                    st.session_state.quote_note = ""
+
+                    st.success(
+                        f"{selected_customer} için {quote_id} numaralı teklif iş emrine dönüştürüldü. (İş Emri: {job_id})"
+                    )
 # ----------------------
 # 2) İş Emri
 # ----------------------
@@ -559,6 +624,8 @@ elif menu.startswith("📋"):
                 "prio": prio,
                 "due": due.strftime("%Y-%m-%d"),
                 "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "source": "Manuel",
+                "quote_id": None,
             }
         )
         st.success("İş emri oluşturuldu. Teklif ve stok adımlarından ilerlemeye devam edebilirsiniz 👉")
@@ -569,6 +636,26 @@ elif menu.startswith("📋"):
     else:
         st.info("Henüz iş emri yok. Üstteki formdan ekleyin.")
 
+    if st.session_state.converted_quotes:
+        st.subheader("İş Emrine Dönüşmüş Teklifler")
+        converted_df = pd.DataFrame(
+            [
+                {
+                    "Teklif No": q["quote_id"],
+                    "İş Emri No": q["job_id"],
+                    "Cari": q["customer"],
+                    "Kalem Sayısı": q["item_count"],
+                    "Toplam (₺)": q["grand_total"],
+                    "Onay Tarihi": q["approved_at"],
+                }
+                for q in st.session_state.converted_quotes
+            ]
+        )
+        if not converted_df.empty:
+            converted_df = converted_df.sort_values("Onay Tarihi", ascending=False)
+            st.dataframe(converted_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("Onaylanmış teklif bulunmuyor.")
 # ----------------------
 # 3) Stok
 # ----------------------
