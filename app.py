@@ -14,6 +14,7 @@ import re
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+import struct
 from typing import List, Optional
 from urllib.request import urlopen
 
@@ -22,6 +23,9 @@ import streamlit as st
 from fpdf import FPDF
 
 st.set_page_config(page_title="Stok Hero", layout="wide", page_icon="🦸")
+
+BASE_DIR = Path(__file__).resolve().parent
+BFM_LOGO_PATH = BASE_DIR / "assets" / "bfm.png"
 
 BFM_LOGO_URL = "https://bfm.com.tr/upload/temp/resim-558579_w460_h186.png"
 
@@ -204,7 +208,7 @@ def icon_badge(text: str, color: str = "#2ecc71", emoji: str = "✅") -> str:
         <span>{text}</span>
     </span>
     """
-FONT_DIR = Path(__file__).parent / "fonts"
+FONT_DIR = BASE_DIR / "fonts"
 
 
 def _register_pdf_fonts(pdf: FPDF) -> str:
@@ -237,10 +241,33 @@ def _register_pdf_fonts(pdf: FPDF) -> str:
 
     return "DejaVu"
 
+def _extract_png_dimensions(data: bytes) -> Optional[tuple[int, int]]:
+    """Read the width and height from PNG bytes if possible."""
+
+    png_signature = b"\x89PNG\r\n\x1a\n"
+    if not data.startswith(png_signature) or len(data) < 24:
+        return None
+
+    try:
+        width, height = struct.unpack(">II", data[16:24])
+    except struct.error:
+        return None
+
+    if width <= 0 or height <= 0:
+        return None
+
+    return int(width), int(height)
+
 
 @lru_cache(maxsize=1)
 def _load_bfm_logo_bytes() -> Optional[bytes]:
-    """Fetch the BFM logo from the remote URL and cache the bytes."""
+    """Obtain the BFM logo bytes from the local assets folder or fall back to the remote URL."""
+
+    if BFM_LOGO_PATH.exists():
+        try:
+            return BFM_LOGO_PATH.read_bytes()
+        except OSError:
+            pass
 
     try:
         with urlopen(BFM_LOGO_URL, timeout=5) as response:
@@ -280,7 +307,13 @@ def generate_quote_pdf(
     logo_bytes = _load_bfm_logo_bytes()
     if logo_bytes:
         logo_width = 80
-        logo_height = logo_width * (186 / 460)
+        dimensions = _extract_png_dimensions(logo_bytes)
+        if dimensions:
+            width_px, height_px = dimensions
+            aspect_ratio = height_px / width_px
+        else:
+            aspect_ratio = 186 / 460
+        logo_height = logo_width * aspect_ratio
         logo_buffer = io.BytesIO(logo_bytes)
         try:
             logo_buffer.seek(0)
