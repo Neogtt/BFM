@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 import io
+import re
 from datetime import datetime
 from typing import List
 
@@ -1058,6 +1059,31 @@ elif menu.startswith("👥"):
     else:
         st.subheader("Kayıtlı Cari Hesaplar")
         st.dataframe(st.session_state.customer_accounts, use_container_width=True, hide_index=True)
+        
+        st.markdown("#### Cari Kaydını Dışa Aktar")
+        export_options = st.session_state.customer_accounts["Firma / Cari"].tolist()
+        selected_export = st.selectbox(
+            "Dışa aktarılacak cari kaydı seçin",
+            export_options,
+            key="single_customer_export",
+        )
+
+        if selected_export:
+            single_account = st.session_state.customer_accounts[
+                st.session_state.customer_accounts["Firma / Cari"] == selected_export
+            ]
+            safe_name = re.sub(r"[^0-9a-zA-Z]+", "_", selected_export.strip()).strip("_") or "cari_kaydi"
+            single_buf = io.BytesIO()
+            with pd.ExcelWriter(single_buf, engine="openpyxl") as writer:
+                single_account.to_excel(writer, index=False, sheet_name="CariKaydi")
+            single_buf.seek(0)
+            st.download_button(
+                "📤 Seçili Cari Kaydı Dışa Aktar",
+                data=single_buf.read(),
+                file_name=f"cari_{safe_name.lower()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
 
         export_buf = io.BytesIO()
         with pd.ExcelWriter(export_buf, engine="openpyxl") as writer:
