@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import List
 
 import pandas as pd
@@ -199,6 +200,30 @@ def icon_badge(text: str, color: str = "#2ecc71", emoji: str = "✅") -> str:
         <span>{text}</span>
     </span>
     """
+FONT_DIR = Path(__file__).parent / "fonts"
+
+
+def _register_pdf_fonts(pdf: FPDF) -> str:
+    """Ensure the PDF instance has access to Unicode-capable fonts."""
+
+    font_files = {
+        "": FONT_DIR / "DejaVuSans.ttf",
+        "B": FONT_DIR / "DejaVuSans-Bold.ttf",
+    }
+
+    for style, path in font_files.items():
+        if not path.exists():
+            raise FileNotFoundError(f"Beklenen font dosyası bulunamadı: {path}")
+        try:
+            pdf.add_font("DejaVu", style, str(path), uni=True)
+        except RuntimeError as exc:
+            # Aynı font birden fazla eklenmeye çalışılırsa FPDF hata verir.
+            if "already added" not in str(exc).lower():
+                raise
+
+    return "DejaVu"
+
+
 
 def generate_quote_pdf(
     company: str,
@@ -214,19 +239,21 @@ def generate_quote_pdf(
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
+   
+    font_family = _register_pdf_fonts(pdf)
 
     # Header / Logo area
     pdf.set_fill_color(108, 92, 231)
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 28)
+    pdf.set_font(font_family, "B", 28)
     pdf.cell(0, 18, "BFM", ln=True, align="C", fill=True)
 
     pdf.ln(6)
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_font(font_family, "B", 14)
     pdf.cell(0, 10, "Teklif Özeti", ln=True)
 
-    pdf.set_font("Helvetica", "", 11)
+    pdf.set_font(font_family, "", 11)
     pdf.cell(0, 7, f"Tarih: {datetime.now().strftime('%d.%m.%Y')}", ln=True)
     pdf.cell(0, 7, f"Firma: {company}", ln=True)
     if contact:
@@ -237,7 +264,7 @@ def generate_quote_pdf(
         pdf.cell(0, 7, f"E-posta: {email}", ln=True)
 
     pdf.ln(4)
-    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_font(font_family, "B", 11)
     pdf.set_fill_color(240, 240, 240)
     headers = ["Kod", "Ürün", "Birim", "Adet", "Birim Fiyat", "Tutar"]
     widths = [25, 75, 20, 20, 28, 28]
@@ -245,7 +272,7 @@ def generate_quote_pdf(
         pdf.cell(width, 9, header, border=1, align="C", fill=True)
     pdf.ln(9)
 
-    pdf.set_font("Helvetica", "", 10)
+    pdf.set_font(font_family, "", 10)
     for _, row in items.iterrows():
         name = str(row.get("name", ""))
         if len(name) > 42:
@@ -273,23 +300,23 @@ def generate_quote_pdf(
         pdf.ln(8)
 
     pdf.ln(4)
-    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_font(font_family, "B", 12)
     pdf.cell(0, 8, "Tutar Özeti", ln=True)
-    pdf.set_font("Helvetica", "", 11)
+    pdf.set_font(font_family, "", 11)
     pdf.cell(0, 7, f"Ürün Toplamı: {subtotal:,.2f} ₺", ln=True)
     pdf.cell(0, 7, f"İşçilik / Hizmet: {labor_cost:,.2f} ₺", ln=True)
-    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_font(font_family, "B", 12)
     pdf.cell(0, 8, f"Genel Toplam: {grand_total:,.2f} ₺", ln=True)
 
     if notes:
         pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_font(font_family, "B", 12)
         pdf.cell(0, 8, "Notlar", ln=True)
-        pdf.set_font("Helvetica", "", 11)
+        pdf.set_font(font_family, "", 11)
         pdf.multi_cell(0, 6, notes)
 
     pdf.ln(12)
-    pdf.set_font("Helvetica", "", 11)
+    pdf.set_font(font_family, "", 11)
     pdf.cell(0, 7, "Müşteri Onayı:", ln=True)
     pdf.ln(14)
     pdf.cell(0, 7, "İsim / Ünvan: _______________________________", ln=True)
