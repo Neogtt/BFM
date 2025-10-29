@@ -223,6 +223,45 @@ def generate_quote_pdf(
 
     return pdf.output(dest="S").encode("latin-1")
 
+# ----------------------
+# Teklif Yönetim Yardımcıları
+# ----------------------
+
+def _create_new_quote(selected_customer: str) -> str:
+    """Yeni teklif numarası üretip oturum durumuna kaydeder."""
+    st.session_state.quote_counter += 1
+    quote_id = f"TEKLIF-{st.session_state.quote_counter:04d}"
+    created_ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    st.session_state.current_quote_id = quote_id
+    st.session_state.quotes[quote_id] = {
+        "quote_id": quote_id,
+        "customer": selected_customer,
+        "status": "Taslak",
+        "created": created_ts,
+        "updated": created_ts,
+        "item_count": 0,
+        "subtotal": 0.0,
+        "labor_cost": 0.0,
+        "grand_total": 0.0,
+    }
+    return quote_id
+
+
+def _get_or_create_quote(selected_customer: str) -> str:
+    quote_id = st.session_state.get("current_quote_id")
+    if not quote_id:
+        return _create_new_quote(selected_customer)
+
+    quote_info = st.session_state.quotes.get(quote_id)
+    if not quote_info:
+        return _create_new_quote(selected_customer)
+
+    if quote_info.get("customer") != selected_customer:
+        quote_info["customer"] = selected_customer
+        quote_info["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        st.session_state.quotes[quote_id] = quote_info
+    return quote_id
+
 
 # ----------------------
 # Session State
@@ -250,8 +289,12 @@ if "job_orders" not in st.session_state:
     st.session_state.job_orders = []  # basit liste
 if "converted_quotes" not in st.session_state:
     st.session_state.converted_quotes = []
+if "quotes" not in st.session_state:
+    st.session_state.quotes = {}
 if "quote_counter" not in st.session_state:
     st.session_state.quote_counter = 0
+if "current_quote_id" not in st.session_state:
+    st.session_state.current_quote_id = None
 if "selected_customer" not in st.session_state:
     st.session_state.selected_customer = None
 if "labor_cost" not in st.session_state:
@@ -343,6 +386,8 @@ if menu.startswith("💰"):
             index=default_idx,
         )
         st.session_state.selected_customer = selected_customer
+        current_quote_id = _get_or_create_quote(selected_customer)
+        st.caption(f"Aktif Teklif ID: :blue[{current_quote_id}]")
 
         # Cari özet bilgisi
         customer_row = st.session_state.customer_accounts[
@@ -488,8 +533,25 @@ if menu.startswith("💰"):
             with info_col:
                 if not st.session_state.purchase_df.empty:
                     st.warning("Stok yetersiz kalemler tespit edildi ve Satın Alma listesine eklendi 🛒")
+
+            
+            quote_entry = st.session_state.quotes.get(current_quote_id, {})
+            quote_entry.update(
+                {
+                    "quote_id": current_quote_id,
+                    "customer": selected_customer,
+                    "item_count": int(len(edited)),
+                    "subtotal": total,
+                    "labor_cost": float(labor_cost or 0.0),
+                    "grand_total": grand_total,
+                    "updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                }
+            )
+            st.session_state.quotes[current_quote_id] = quote_entry
          
             notes = st.text_area("Teklif Notları / İşçilik Detayı", key="quote_note")
+            if current_quote_id in st.session_state.quotes:
+                st.session_state.quotes[current_quote_id]["notes"] = notes
 
             st.divider()
             st.subheader("Teklif PDF/Excel Çıktısı")
@@ -546,8 +608,7 @@ if menu.startswith("💰"):
                 if edited.empty:
                     st.warning("Onaylanacak teklif kalemi bulunamadı.")
                 else:
-                    st.session_state.quote_counter += 1
-                    quote_id = f"TEKLIF-{st.session_state.quote_counter:04d}"
+                    quote_id = current_quote_id or _get_or_create_quote(selected_customer)
                     job_id = f"JOB-{len(st.session_state.job_orders)+1:04d}"
                     short_note = notes.strip() if isinstance(notes, str) else ""
                     if short_note:
@@ -571,19 +632,36 @@ if menu.startswith("💰"):
                         }
                     )
 
-                    st.session_state.converted_quotes.append(
+                    approved_ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    quote_entry = st.session_state.quotes.get(quote_id, {})
+                    quote_entry.update(
                         {
-                            "quote_id": quote_id,
+                            "status": "İş Emri",
                             "job_id": job_id,
-                            "customer": selected_customer,
-                            "item_count": len(edited),
+                            "approved_at": approved_ts,
+                            "item_count": int(len(edited)),
                             "subtotal": total,
                             "labor_cost": float(labor_cost or 0.0),
                             "grand_total": grand_total,
-                            "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "updated": approved_ts,
                         }
                     )
+                    st.session_state.quotes[quote_id] = quote_entry
 
+                    if not any(q.get("quote_id") == quote_id for q in st.session_state.converted_quotes):
+                        st.session_state.converted_quotes.append(
+                            {
+                                "quote_id": quote_id,
+                                "job_id": job_id,
+                                "customer": selected_customer,
+                                "item_count": len(edited),
+                                "subtotal": total,
+                                "labor_cost": float(labor_cost or 0.0),
+                                "grand_total": grand_total,
+                                "approved_at": approved_ts,
+                            }
+                        )
+                        
                     st.session_state.cart_df = pd.DataFrame(
                         columns=["code", "name", "unit", "qty", "price"]
                     )
@@ -592,6 +670,7 @@ if menu.startswith("💰"):
                     )
                     st.session_state.labor_cost = 0.0
                     st.session_state.quote_note = ""
+                    st.session_state.current_quote_id = None
 
                     st.success(
                         f"{selected_customer} için {quote_id} numaralı teklif iş emrine dönüştürüldü. (İş Emri: {job_id})"
@@ -605,6 +684,7 @@ elif menu.startswith("📋"):
         st.caption(f"Seçili cari: {st.session_state.selected_customer}")
     if not st.session_state.cart_df.empty:
         st.caption(f"Teklif sepetinde {len(st.session_state.cart_df)} kalem hazır.")
+    selected_quote_for_job = None
     with st.form("job_form", clear_on_submit=True):
         c1, c2 = st.columns([2, 1])
         with c1:
@@ -612,22 +692,54 @@ elif menu.startswith("📋"):
             requester = st.text_input("Talep Eden (Güvenlik Şirketi / Kişi)", value=requester_default)
             description = st.text_area("Talep Açıklaması", placeholder="Örn: Kamera kurulum malzemeleri…")
         with c2:
-            prio = st.selectbox("Öncelik", ["Normal", "Acil", "Düşük"]) 
+            prio = st.selectbox("Öncelik", ["Normal", "Acil", "Düşük"])
             due = st.date_input("Termin Tarihi", value=datetime.today())
+            quote_choices = [None] + sorted(st.session_state.quotes.keys())
+            selected_quote_for_job = st.selectbox(
+                "Teklif ID (opsiyonel)",
+                quote_choices,
+                format_func=lambda x: "Teklif seç (opsiyonel)" if x is None else f"{x} • {st.session_state.quotes.get(x, {}).get('customer', 'Bilinmiyor')}",
+            )
         submitted = st.form_submit_button("İş Emrini Kaydet ✍️")
     if submitted:
+        job_id = f"JOB-{len(st.session_state.job_orders)+1:04d}"
         st.session_state.job_orders.append(
             {
-                "id": f"JOB-{len(st.session_state.job_orders)+1:04d}",
+                "id": job_id,
                 "requester": requester,
                 "desc": description,
                 "prio": prio,
                 "due": due.strftime("%Y-%m-%d"),
                 "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "source": "Manuel",
-                "quote_id": None,
+                "quote_id": selected_quote_for_job,
             }
         )
+        if selected_quote_for_job:
+            quote_entry = st.session_state.quotes.get(selected_quote_for_job, {})
+            updated_ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            quote_entry.update(
+                {
+                    "status": "İş Emri",
+                    "job_id": job_id,
+                    "approved_at": quote_entry.get("approved_at", updated_ts),
+                    "updated": updated_ts,
+                }
+            )
+            st.session_state.quotes[selected_quote_for_job] = quote_entry
+            if not any(q.get("quote_id") == selected_quote_for_job for q in st.session_state.converted_quotes):
+                st.session_state.converted_quotes.append(
+                    {
+                        "quote_id": selected_quote_for_job,
+                        "job_id": job_id,
+                        "customer": quote_entry.get("customer", requester),
+                        "item_count": quote_entry.get("item_count", 0),
+                        "subtotal": quote_entry.get("subtotal", 0.0),
+                        "labor_cost": quote_entry.get("labor_cost", 0.0),
+                        "grand_total": quote_entry.get("grand_total", 0.0),
+                        "approved_at": quote_entry.get("approved_at", updated_ts),
+                    }
+                )
         st.success("İş emri oluşturuldu. Teklif ve stok adımlarından ilerlemeye devam edebilirsiniz 👉")
 
     if st.session_state.job_orders:
