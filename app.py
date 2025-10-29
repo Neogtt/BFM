@@ -333,7 +333,10 @@ def generate_quote_pdf(
     pdf.ln(12)
     pdf.cell(0, 7, "İmza: _______________________________", ln=True)
 
-    return pdf.output(dest="S").encode("latin-1")
+    pdf_content = pdf.output(dest="S")
+    if isinstance(pdf_content, str):
+        return pdf_content.encode("latin-1")
+    return pdf_content
 
 # ----------------------
 # Teklif Yönetim Yardımcıları
