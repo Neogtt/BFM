@@ -209,7 +209,7 @@ if x_file is not None:
 else:
     data, fname, mime, label = get_sample_download()
 st.sidebar.download_button(
-        label,
+        label=label,
         data=data,
         file_name=fname,
         mime=mime,
