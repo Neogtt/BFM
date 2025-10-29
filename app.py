@@ -243,6 +243,7 @@ def _create_new_quote(selected_customer: str) -> str:
         "subtotal": 0.0,
         "labor_cost": 0.0,
         "grand_total": 0.0,
+        "items": [],
     }
     return quote_id
 
@@ -547,6 +548,11 @@ if menu.startswith("💰"):
                     "updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 }
             )
+            if not edited.empty:
+                item_columns = ["code", "name", "unit", "qty", "price", "line_total"]
+                quote_entry["items"] = edited[item_columns].to_dict("records")
+            else:
+                quote_entry["items"] = []
             st.session_state.quotes[current_quote_id] = quote_entry
          
             notes = st.text_area("Teklif Notları / İşçilik Detayı", key="quote_note")
@@ -684,63 +690,112 @@ elif menu.startswith("📋"):
         st.caption(f"Seçili cari: {st.session_state.selected_customer}")
     if not st.session_state.cart_df.empty:
         st.caption(f"Teklif sepetinde {len(st.session_state.cart_df)} kalem hazır.")
+    quotes_dict = st.session_state.quotes
     selected_quote_for_job = None
-    with st.form("job_form", clear_on_submit=True):
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            requester_default = st.session_state.selected_customer or ""
-            requester = st.text_input("Talep Eden (Güvenlik Şirketi / Kişi)", value=requester_default)
-            description = st.text_area("Talep Açıklaması", placeholder="Örn: Kamera kurulum malzemeleri…")
-        with c2:
-            prio = st.selectbox("Öncelik", ["Normal", "Acil", "Düşük"])
-            due = st.date_input("Termin Tarihi", value=datetime.today())
-            quote_choices = [None] + sorted(st.session_state.quotes.keys())
-            selected_quote_for_job = st.selectbox(
-                "Teklif ID (opsiyonel)",
-                quote_choices,
-                format_func=lambda x: "Teklif seç (opsiyonel)" if x is None else f"{x} • {st.session_state.quotes.get(x, {}).get('customer', 'Bilinmiyor')}",
-            )
-        submitted = st.form_submit_button("İş Emrini Kaydet ✍️")
-    if submitted:
-        job_id = f"JOB-{len(st.session_state.job_orders)+1:04d}"
-        st.session_state.job_orders.append(
-            {
-                "id": job_id,
-                "requester": requester,
-                "desc": description,
-                "prio": prio,
-                "due": due.strftime("%Y-%m-%d"),
-                "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "source": "Manuel",
-                "quote_id": selected_quote_for_job,
-            }
+    if not quotes_dict:
+        st.info("İş emri oluşturmak için önce bir teklif hazırlayın.")
+    else:
+        quote_choices = sorted(quotes_dict.keys())
+        selected_quote_for_job = st.selectbox(
+            "Teklif ID",
+            quote_choices,
+            format_func=lambda x: f"{x} • {quotes_dict.get(x, {}).get('customer', 'Bilinmiyor')}",
+            key="job_selected_quote",   
         )
-        if selected_quote_for_job:
-            quote_entry = st.session_state.quotes.get(selected_quote_for_job, {})
-            updated_ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-            quote_entry.update(
-                {
-                    "status": "İş Emri",
-                    "job_id": job_id,
-                    "approved_at": quote_entry.get("approved_at", updated_ts),
-                    "updated": updated_ts,
+
+        quote_details = quotes_dict.get(selected_quote_for_job, {})
+        st.subheader("Seçilen Teklif Özeti")
+        summary_col1, summary_col2, summary_col3 = st.columns(3)
+        with summary_col1:
+            st.metric("Cari Hesap", quote_details.get("customer", "-"))
+        with summary_col2:
+            st.metric("Kalem Sayısı", int(quote_details.get("item_count", 0)))
+        with summary_col3:
+            st.metric("Genel Toplam", f"{float(quote_details.get('grand_total', 0.0)):,.2f} ₺")
+
+        notes_text = quote_details.get("notes")
+        if notes_text:
+            st.info(f"Teklif Notu: {notes_text}")
+
+        items = quote_details.get("items", [])
+        if items:
+            items_df = pd.DataFrame(items).rename(
+                columns={
+                    "code": "Kod",
+                    "name": "Kalem",
+                    "unit": "Birim",
+                    "qty": "Adet",
+                    "price": "Birim Fiyat",
+                    "line_total": "Tutar",
                 }
             )
-            st.session_state.quotes[selected_quote_for_job] = quote_entry
-            if not any(q.get("quote_id") == selected_quote_for_job for q in st.session_state.converted_quotes):
-                st.session_state.converted_quotes.append(
+            st.dataframe(items_df, use_container_width=True, hide_index=True)
+        else:
+            st.warning("Bu teklif için kalem bilgisi bulunamadı.")
+
+        with st.form("job_form", clear_on_submit=True):
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                requester_default = quote_details.get("customer") or st.session_state.selected_customer or ""
+                requester = st.text_input(
+                    "Talep Eden (Güvenlik Şirketi / Kişi)", value=requester_default
+                )
+                description = st.text_area(
+                    "Talep Açıklaması", placeholder="Örn: Kamera kurulum malzemeleri…"
+                )
+            with c2:
+                prio = st.selectbox("Öncelik", ["Normal", "Acil", "Düşük"])
+                due = st.date_input("Termin Tarihi", value=datetime.today())
+                st.markdown(f"**Seçilen Teklif:** {selected_quote_for_job}")
+            submitted = st.form_submit_button("İş Emrini Kaydet ✍️")
+
+        if submitted:
+            if not selected_quote_for_job:
+                st.error("İş emri oluşturmak için bir teklif seçmelisiniz.")
+            else:
+                job_id = f"JOB-{len(st.session_state.job_orders)+1:04d}"
+                st.session_state.job_orders.append(
                     {
+                        "id": job_id,
+                        "requester": requester,
+                        "desc": description,
+                        "prio": prio,
+                        "due": due.strftime("%Y-%m-%d"),
+                        "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "source": "Manuel",
                         "quote_id": selected_quote_for_job,
-                        "job_id": job_id,
-                        "customer": quote_entry.get("customer", requester),
-                        "item_count": quote_entry.get("item_count", 0),
-                        "subtotal": quote_entry.get("subtotal", 0.0),
-                        "labor_cost": quote_entry.get("labor_cost", 0.0),
-                        "grand_total": quote_entry.get("grand_total", 0.0),
-                        "approved_at": quote_entry.get("approved_at", updated_ts),
                     }
                 )
-        st.success("İş emri oluşturuldu. Teklif ve stok adımlarından ilerlemeye devam edebilirsiniz 👉")
+
+                quote_entry = st.session_state.quotes.get(selected_quote_for_job, {})
+                updated_ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+                quote_entry.update(
+                    {
+                        "status": "İş Emri",
+                        "job_id": job_id,
+                        "approved_at": quote_entry.get("approved_at", updated_ts),
+                        "updated": updated_ts,
+                    }
+                )
+                st.session_state.quotes[selected_quote_for_job] = quote_entry
+
+                if not any(q.get("quote_id") == selected_quote_for_job for q in st.session_state.converted_quotes):
+                    st.session_state.converted_quotes.append(
+                        {
+                            "quote_id": selected_quote_for_job,
+                            "job_id": job_id,
+                            "customer": quote_entry.get("customer", requester),
+                            "item_count": quote_entry.get("item_count", 0),
+                            "subtotal": quote_entry.get("subtotal", 0.0),
+                            "labor_cost": quote_entry.get("labor_cost", 0.0),
+                            "grand_total": quote_entry.get("grand_total", 0.0),
+                            "approved_at": quote_entry.get("approved_at", updated_ts),
+                        }
+                    )
+
+                st.success(
+                    "İş emri oluşturuldu. Teklif ve stok adımlarından ilerlemeye devam edebilirsiniz 👉"
+                )
 
     if st.session_state.job_orders:
         st.subheader("Açık İş Emirleri")
