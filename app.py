@@ -187,7 +187,7 @@ st.divider()
 # ----------------------
 menu = st.sidebar.radio(
     "Menü",
-    ["📋 İş Emri", "📦 Stok", "💰 Teklif", "👥 Cari Hesap", "🛒 Satın Alma", "🚦 Durum Takip"],
+    ["👥 Cari Hesap", "📋 İş Emri", "📦 Stok", "💰 Teklif", "🛒 Satın Alma", "🚦 Durum Takip"],
 )
 
 # ----------------------
