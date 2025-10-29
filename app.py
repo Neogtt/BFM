@@ -269,25 +269,37 @@ elif menu.startswith("📦"):
             df = df[df["name"].str.contains(q, case=False, na=False) | df["code"].str.contains(q, case=False, na=False)]
         df = df[df["stock"] >= min_stock].sort_values(sort_by)
 
-        st.caption("Satırları seçip alttan miktar belirleyin, sonra \"Sepete Ekle\".")
-        selected = st.data_editor(
-            df,
+        st.caption("Satırları işaretleyip alttan miktar belirleyin, sonra \"Sepete Ekle\".")
+
+        select_col = "__select__"
+        display_df = df.copy()
+        display_df[select_col] = False
+
+        edited = st.data_editor(
+            display_df,
             use_container_width=True,
             hide_index=True,
             column_config={
                 "price": st.column_config.NumberColumn("price", format="%.2f"),
                 "stock": st.column_config.NumberColumn("stock", step=1),
+                    select_col: st.column_config.CheckboxColumn(
+                    "Seç",
+                    help="Sepete eklenecek satırları işaretleyin.",
+                    default=False,
+                ),
             },
             disabled=["code", "name", "unit", "stock", "price"],
-            selection_mode="multi-row",
             key="stock_editor",
         )
 
-        sel_rows: List[int] = selected.get("selected_rows", []) if isinstance(selected, dict) else []
+        if isinstance(edited, pd.DataFrame):
+            sel_rows: List[int] = edited.index[edited[select_col]].tolist()
+        else:
+            sel_rows = []
         qty = st.number_input("Seçilen her ürün için eklenecek adet", min_value=1, value=1, step=1)
         add_btn = st.button("🧲 Sepete Ekle", type="primary", use_container_width=True)
         if add_btn and sel_rows:
-            add_items = df.iloc[sel_rows].copy()
+            add_items = df.loc[sel_rows].copy()
             add_items["qty"] = qty
             add_items = add_items[["code", "name", "unit", "qty", "price"]]
             # Mevcut sepetle birleştir (aynı kod varsa qty topla)
