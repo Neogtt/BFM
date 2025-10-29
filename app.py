@@ -185,8 +185,9 @@ x_file = st.sidebar.file_uploader("Stok dosyası (.xlsx veya .csv)", type=["xlsx
 
 if x_file is not None:
     try:
-        if x_file.name.lower().endswith(".csv"):
-        raw = pd.read_csv(x_file)
+if x_file.name.lower().endswith(".csv"):
+    raw = pd.read_csv(x_file)
+
     else:
         raw = pd.read_excel(x_file, sheet_name=0)
         st.session_state.stock_df = _normalize_cols(raw)
