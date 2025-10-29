@@ -12,14 +12,18 @@ from __future__ import annotations
 import io
 import re
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
-from typing import List
+from typing import List, Optional
+from urllib.request import urlopen
 
 import pandas as pd
 import streamlit as st
 from fpdf import FPDF
 
 st.set_page_config(page_title="Stok Hero", layout="wide", page_icon="🦸")
+
+BFM_LOGO_URL = "https://bfm.com.tr/upload/temp/resim-558579_w460_h186.png"
 
 # ----------------------
 # Yardımcı Fonksiyonlar
@@ -234,6 +238,25 @@ def _register_pdf_fonts(pdf: FPDF) -> str:
     return "DejaVu"
 
 
+@lru_cache(maxsize=1)
+def _load_bfm_logo_bytes() -> Optional[bytes]:
+    """Fetch the BFM logo from the remote URL and cache the bytes."""
+
+    try:
+        with urlopen(BFM_LOGO_URL, timeout=5) as response:
+            content_type = response.headers.get("Content-Type", "")
+            data = response.read()
+    except Exception:
+        return None
+
+    if not data:
+        return None
+
+    if content_type and "image" not in content_type.lower():
+        return None
+
+    return data
+
 
 def generate_quote_pdf(
     company: str,
@@ -253,12 +276,28 @@ def generate_quote_pdf(
     font_family = _register_pdf_fonts(pdf)
 
     # Header / Logo area
-    pdf.set_fill_color(108, 92, 231)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font(font_family, "B", 28)
-    pdf.cell(0, 18, "BFM", ln=True, align="C", fill=True)
+        logo_displayed = False
+    logo_bytes = _load_bfm_logo_bytes()
+    if logo_bytes:
+        logo_width = 80
+        logo_height = logo_width * (186 / 460)
+        logo_buffer = io.BytesIO(logo_bytes)
+        try:
+            logo_buffer.seek(0)
+            x_position = (pdf.w - logo_width) / 2
+            pdf.image(logo_buffer, x=x_position, y=10, w=logo_width)
+            pdf.set_y(10 + logo_height + 6)
+            logo_displayed = True
+        except RuntimeError:
+            pdf.set_y(10)
 
-    pdf.ln(6)
+    if not logo_displayed:
+        pdf.set_fill_color(108, 92, 231)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font(font_family, "B", 28)
+        pdf.cell(0, 18, "BFM", ln=True, align="C", fill=True)
+        pdf.ln(6)
+
     pdf.set_text_color(0, 0, 0)
     pdf.set_font(font_family, "B", 14)
     pdf.cell(0, 10, "Teklif Özeti", ln=True)
