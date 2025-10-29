@@ -15,6 +15,7 @@ from typing import List
 
 import pandas as pd
 import streamlit as st
+from fpdf import FPDF
 
 st.set_page_config(page_title="Stok Hero", layout="wide", page_icon="🦸")
 
@@ -124,6 +125,104 @@ def icon_badge(text: str, color: str = "#2ecc71", emoji: str = "✅") -> str:
     </span>
     """
 
+def generate_quote_pdf(
+    company: str,
+    contact: str,
+    email: str,
+    phone: str,
+    items: pd.DataFrame,
+    subtotal: float,
+    labor_cost: float,
+    grand_total: float,
+    notes: str,
+) -> bytes:
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    # Header / Logo area
+    pdf.set_fill_color(108, 92, 231)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 28)
+    pdf.cell(0, 18, "BFM", ln=True, align="C", fill=True)
+
+    pdf.ln(6)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, "Teklif Özeti", ln=True)
+
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, f"Tarih: {datetime.now().strftime('%d.%m.%Y')}", ln=True)
+    pdf.cell(0, 7, f"Firma: {company}", ln=True)
+    if contact:
+        pdf.cell(0, 7, f"Yetkili: {contact}", ln=True)
+    if phone:
+        pdf.cell(0, 7, f"Telefon: {phone}", ln=True)
+    if email:
+        pdf.cell(0, 7, f"E-posta: {email}", ln=True)
+
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_fill_color(240, 240, 240)
+    headers = ["Kod", "Ürün", "Birim", "Adet", "Birim Fiyat", "Tutar"]
+    widths = [25, 75, 20, 20, 28, 28]
+    for header, width in zip(headers, widths):
+        pdf.cell(width, 9, header, border=1, align="C", fill=True)
+    pdf.ln(9)
+
+    pdf.set_font("Helvetica", "", 10)
+    for _, row in items.iterrows():
+        name = str(row.get("name", ""))
+        if len(name) > 42:
+            name = name[:39] + "…"
+        qty = row.get("qty", 0)
+        try:
+            qty_val = int(float(qty))
+        except (TypeError, ValueError):
+            qty_val = 0
+        price_val = float(row.get("price", 0) or 0)
+        line_total = float(row.get("line_total", price_val * qty_val) or 0)
+
+        cells = [
+            str(row.get("code", "")),
+            name,
+            str(row.get("unit", "")),
+            f"{qty_val}",
+            f"{price_val:,.2f}",
+            f"{line_total:,.2f}",
+        ]
+
+        aligns = ["L", "L", "C", "C", "R", "R"]
+        for content, width, align in zip(cells, widths, aligns):
+            pdf.cell(width, 8, content, border=1, align=align)
+        pdf.ln(8)
+
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Tutar Özeti", ln=True)
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, f"Ürün Toplamı: {subtotal:,.2f} ₺", ln=True)
+    pdf.cell(0, 7, f"İşçilik / Hizmet: {labor_cost:,.2f} ₺", ln=True)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, f"Genel Toplam: {grand_total:,.2f} ₺", ln=True)
+
+    if notes:
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Notlar", ln=True)
+        pdf.set_font("Helvetica", "", 11)
+        pdf.multi_cell(0, 6, notes)
+
+    pdf.ln(12)
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, "Müşteri Onayı:", ln=True)
+    pdf.ln(14)
+    pdf.cell(0, 7, "İsim / Ünvan: _______________________________", ln=True)
+    pdf.ln(12)
+    pdf.cell(0, 7, "İmza: _______________________________", ln=True)
+
+    return pdf.output(dest="S").encode("latin-1")
+
 
 # ----------------------
 # Session State
@@ -151,7 +250,10 @@ if "job_orders" not in st.session_state:
     st.session_state.job_orders = []  # basit liste
 if "selected_customer" not in st.session_state:
     st.session_state.selected_customer = None
-
+if "labor_cost" not in st.session_state:
+    st.session_state.labor_cost = 0.0
+if "quote_note" not in st.session_state:
+    st.session_state.quote_note = ""
 
 # ----------------------
 # Üst Başlık ve Aşama Rozetleri
@@ -362,15 +464,29 @@ if menu.startswith("💰"):
                         })
             st.session_state.purchase_df = pd.DataFrame(purchase_rows)
 
-            c1, c2 = st.columns([2, 1])
-            with c1:
+            summary_col, total_col, info_col = st.columns([1.5, 1, 1])
+            with summary_col:
                 st.subheader("Özet")
                 st.metric("Cari", selected_customer)
                 st.metric("Kalem Sayısı", len(edited))
-                st.metric("Toplam Tutar", f"{total:,.2f} ₺")
-            with c2:
+                st.metric("Ürün Toplamı", f"{total:,.2f} ₺")
+            with total_col:
+                st.subheader("İşçilik / Toplam")
+                labor_cost = st.number_input(
+                    "İşçilik / Hizmet Tutarı (₺)",
+                    min_value=0.0,
+                    step=50.0,
+                    format="%.2f",
+                    key="labor_cost",
+                )
+                st.session_state.labor_cost = float(labor_cost)
+                grand_total = total + float(labor_cost or 0.0)
+                st.metric("Genel Toplam", f"{grand_total:,.2f} ₺")
+            with info_col:
                 if not st.session_state.purchase_df.empty:
                     st.warning("Stok yetersiz kalemler tespit edildi ve Satın Alma listesine eklendi 🛒")
+         
+            notes = st.text_area("Teklif Notları / İşçilik Detayı", key="quote_note")
 
             st.divider()
             st.subheader("Teklif PDF/Excel Çıktısı")
@@ -385,6 +501,34 @@ if menu.startswith("💰"):
                 data=out_buf.read(),
                 file_name=f"teklif_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+
+            contact_val = _display_customer_value(customer_row.get("İlgili Kişi"))
+            email_val = _display_customer_value(customer_row.get("E-posta"))
+            phone_val = _display_customer_value(customer_row.get("Telefon"))
+
+            contact_val = "" if contact_val == "-" else contact_val
+            email_val = "" if email_val == "-" else email_val
+            phone_val = "" if phone_val == "-" else phone_val
+
+            pdf_bytes = generate_quote_pdf(
+                company=selected_customer,
+                contact=contact_val,
+                email=email_val,
+                phone=phone_val,
+                items=edited,
+                subtotal=total,
+                labor_cost=float(labor_cost or 0.0),
+                grand_total=grand_total,
+                notes=notes,
+            )
+
+            st.download_button(
+                "🖨️ Teklif PDF İndir",
+                data=pdf_bytes,
+                file_name=f"teklif_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                mime="application/pdf",
                 use_container_width=True,
             )
 
