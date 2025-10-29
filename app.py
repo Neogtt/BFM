@@ -969,7 +969,7 @@ elif menu.startswith("👥"):
     st.header("👥 Cari Hesaplar")
     st.caption("Teklif vereceğiniz müşteri ve firmaları burada saklayın.")
 
-        with st.expander("📤 Excel/CSV'den cari hesap içe aktar", expanded=False):
+    with st.expander("📤 Excel/CSV'den cari hesap içe aktar", expanded=False):
         with st.form("customer_import_form"):
             import_mode = st.radio(
                 "İçe aktarma modu",
