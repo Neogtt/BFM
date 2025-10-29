@@ -74,7 +74,7 @@ def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _sample_excel() -> bytes:
-    """Örnek Excel dosyası üretir."""
+    """Örnek Excel dosyası üretir (openpyxl varsa)."""
     sample = pd.DataFrame(
         {
             "Malzeme Kodu": ["KBL-1001", "KBL-2002", "KBL-3003", "KBL-4004"],
@@ -85,10 +85,35 @@ def _sample_excel() -> bytes:
         }
     )
     buf = io.BytesIO()
+    # openpyxl yüklü değilse ImportError atar → üst seviye fallback kullanıyoruz
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         sample.to_excel(writer, index=False, sheet_name="Stok")
     buf.seek(0)
     return buf.read()
+
+
+def _sample_csv() -> bytes:
+    """Örnek CSV döndürür (openpyxl yoksa fallback)."""
+    sample = pd.DataFrame(
+        {
+            "Malzeme Kodu": ["KBL-1001", "KBL-2002", "KBL-3003", "KBL-4004"],
+            "Malzeme Adı": ["Kablo CAT6 10m", "RJ45 Konnektör", "UPS 1kVA", "Rack Vidalı Set"],
+            "Birim": ["adet", "adet", "adet", "kutu"],
+            "Stok": [25, 300, 2, 15],
+            "Birim Fiyat": [350.0, 4.2, 6500.0, 90.0],
+        }
+    )
+    return sample.to_csv(index=False).encode("utf-8")
+
+
+def get_sample_download():
+    """Örnek indirme butonu için veri, dosya adı, mime ve etiket döndürür."""
+    try:
+        data = _sample_excel()
+        return data, "stok_ornek.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Örnek Excel İndir"
+    except Exception:
+        data = _sample_csv()
+        return data, "stok_ornek.csv", "text/csv", "Örnek CSV İndir"
 
 
 def icon_badge(text: str, color: str = "#2ecc71", emoji: str = "✅") -> str:
@@ -156,21 +181,25 @@ menu = st.sidebar.radio(
 # Veri Yükleme Alanı
 # ----------------------
 st.sidebar.subheader("📥 Stok Excel Yükle")
-x_file = st.sidebar.file_uploader("Excel (.xlsx)", type=["xlsx"])
+x_file = st.sidebar.file_uploader("Stok dosyası (.xlsx veya .csv)", type=["xlsx", "csv"])
 
 if x_file is not None:
     try:
+        if x_file.name.lower().endswith(".csv"):
+        raw = pd.read_csv(x_file)
+    else:
         raw = pd.read_excel(x_file, sheet_name=0)
         st.session_state.stock_df = _normalize_cols(raw)
         st.sidebar.success("Stok yüklendi ✅")
     except Exception as e:
         st.sidebar.error(f"Excel okunamadı: {e}")
 else:
-    st.sidebar.download_button(
-        "Örnek Excel İndir",
-        data=_sample_excel(),
-        file_name="stok_ornek.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    data, fname, mime, label = get_sample_download()
+st.sidebar.download_button(
+        label,
+        data=data,
+        file_name=fname,
+        mime=mime,
         help="Kolonları otomatik tanıyacak şekilde örnek.",
     )
 
@@ -379,4 +408,3 @@ elif menu.startswith("🚦"):
         st.progress(min(total_stock / 1000, 1.0), text="Depo doluluk göstergesi (temsili)")
 
 st.sidebar.caption("Made with ❤️  •  Stok Hero Prototype")
-
