@@ -206,14 +206,24 @@ FONT_DIR = Path(__file__).parent / "fonts"
 def _register_pdf_fonts(pdf: FPDF) -> str:
     """Ensure the PDF instance has access to Unicode-capable fonts."""
 
+    system_font_dir = Path("/usr/share/fonts/truetype/dejavu")
+
+    def _resolve_font(*candidates: Path) -> Path:
+        for candidate in candidates:
+            if candidate.exists() and candidate.stat().st_size > 1000:
+                return candidate
+        raise FileNotFoundError(
+            "Uygun DejaVu font dosyası bulunamadı. Lütfen fontları yeniden yükleyin."
+        )
+
     font_files = {
-        "": FONT_DIR / "DejaVuSans.ttf",
-        "B": FONT_DIR / "DejaVuSans-Bold.ttf",
+        "": _resolve_font(FONT_DIR / "DejaVuSans.ttf", system_font_dir / "DejaVuSans.ttf"),
+        "B": _resolve_font(
+            FONT_DIR / "DejaVuSans-Bold.ttf", system_font_dir / "DejaVuSans-Bold.ttf"
+        ),
     }
 
     for style, path in font_files.items():
-        if not path.exists():
-            raise FileNotFoundError(f"Beklenen font dosyası bulunamadı: {path}")
         try:
             pdf.add_font("DejaVu", style, str(path), uni=True)
         except RuntimeError as exc:
