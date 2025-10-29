@@ -134,6 +134,19 @@ if "cart_df" not in st.session_state:
     st.session_state.cart_df = pd.DataFrame(columns=["code", "name", "unit", "qty", "price"])  # Teklif
 if "purchase_df" not in st.session_state:
     st.session_state.purchase_df = pd.DataFrame(columns=["code", "name", "unit", "needed_qty"])  # Satın alma
+if "customer_accounts" not in st.session_state:
+    st.session_state.customer_accounts = pd.DataFrame(
+        columns=[
+            "Firma / Cari",
+            "İlgili Kişi",
+            "E-posta",
+            "Telefon",
+            "Notlar",
+            "Son Teklif Tutarı",
+            "Statü",
+            "Kayıt Tarihi",
+        ]
+    )
 if "job_orders" not in st.session_state:
     st.session_state.job_orders = []  # basit liste
 
@@ -174,7 +187,7 @@ st.divider()
 # ----------------------
 menu = st.sidebar.radio(
     "Menü",
-    ["📋 İş Emri", "📦 Stok", "💰 Teklif", "🛒 Satın Alma", "🚦 Durum Takip"],
+    ["📋 İş Emri", "📦 Stok", "💰 Teklif", "👥 Cari Hesap", "🛒 Satın Alma", "🚦 Durum Takip"],
 )
 
 # ----------------------
@@ -360,9 +373,70 @@ elif menu.startswith("💰"):
             use_container_width=True,
         )
 
+# 4) Cari Hesaplar
 # ----------------------
-# 4) Satın Alma
+elif menu.startswith("👥"):
+    st.header("👥 Cari Hesaplar")
+    st.caption("Teklif vereceğiniz müşteri ve firmaları burada saklayın.")
+
+    with st.form("customer_form", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            account_name = st.text_input("Firma / Cari Adı", placeholder="Örn: Parlak Güvenlik A.Ş.")
+            contact_name = st.text_input("İlgili Kişi", placeholder="Örn: Ayşe Yılmaz")
+            email = st.text_input("E-posta", placeholder="ornek@firma.com")
+            phone = st.text_input("Telefon", placeholder="0 (5xx) xxx xx xx")
+        with c2:
+            status = st.selectbox("Statü", ["Potansiyel", "Teklif Verildi", "Kazandı", "Kaybedildi"])
+            last_quote = st.number_input(
+                "Son Teklif Tutarı (₺)", min_value=0.0, value=0.0, step=100.0, format="%0.2f"
+            )
+            notes = st.text_area("Notlar", placeholder="Gereksinimler, hatırlatmalar…")
+        submitted = st.form_submit_button("Cari Kaydı Ekle 📇")
+
+    if submitted:
+        if account_name:
+            new_row = pd.DataFrame(
+                [
+                    {
+                        "Firma / Cari": account_name,
+                        "İlgili Kişi": contact_name,
+                        "E-posta": email,
+                        "Telefon": phone,
+                        "Notlar": notes,
+                        "Son Teklif Tutarı": last_quote if last_quote else None,
+                        "Statü": status,
+                        "Kayıt Tarihi": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    }
+                ]
+            )
+            st.session_state.customer_accounts = pd.concat(
+                [st.session_state.customer_accounts, new_row], ignore_index=True
+            )
+            st.success("Cari hesap kaydedildi ✅")
+        else:
+            st.warning("Firma / Cari adı zorunludur.")
+
+    if st.session_state.customer_accounts.empty:
+        st.info("Henüz cari hesap eklenmedi. Yukarıdaki formdan ekleyin.")
+    else:
+        st.subheader("Kayıtlı Cari Hesaplar")
+        st.dataframe(st.session_state.customer_accounts, use_container_width=True, hide_index=True)
+
+        export_buf = io.BytesIO()
+        with pd.ExcelWriter(export_buf, engine="openpyxl") as writer:
+            st.session_state.customer_accounts.to_excel(writer, index=False, sheet_name="CariHesaplar")
+        export_buf.seek(0)
+        st.download_button(
+            "📥 Cari Hesap Excel İndir",
+            data=export_buf.read(),
+            file_name="cari_hesaplar.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+
 # ----------------------
+# 5) Satın Alma
 elif menu.startswith("🛒"):
     st.header("🛒 Satın Alma Kuyruğu")
     if st.session_state.purchase_df.empty:
@@ -380,7 +454,7 @@ elif menu.startswith("🛒"):
         )
 
 # ----------------------
-# 5) Durum Takip
+# 6) Durum Takip
 # ----------------------
 elif menu.startswith("🚦"):
     st.header("🚦 Durum Takip (Akış Haritası)")
