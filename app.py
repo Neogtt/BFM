@@ -2,7 +2,7 @@
 # --------------------------------------------------------
 # Notlar:
 # - Ekstra paket gerekmeden çalışır: streamlit, pandas, openpyxl (Excel için)
-# - Sol menüde akış adımları: İş Emri, Stok, Teklif, Satın Alma, Durum Takip
+# - Sol menüde akış adımları: Cari Hesap, Teklif, İş Emri, Stok, Satın Alma, Durum Takip
 # - "Sürükle-bırak" hissi için; Stok listesinden satır seçip "Sepete ekle" butonu ile Teklif sepetine atılır.
 # - Teklifte adetler düzenlenir; stok yetersiz olanlar otomatik Satın Alma listesine düşer.
 # - Üretim amaçlı örnek şablon Excel indirebilirsiniz.
@@ -149,6 +149,8 @@ if "customer_accounts" not in st.session_state:
     )
 if "job_orders" not in st.session_state:
     st.session_state.job_orders = []  # basit liste
+if "selected_customer" not in st.session_state:
+    st.session_state.selected_customer = None
 
 
 # ----------------------
@@ -172,11 +174,11 @@ purchase_count = len(st.session_state.purchase_df)
 
 colA, colB, colC, colD = st.columns(4)
 with colA:
-    st.markdown(icon_badge("Yeni İş Emri", "#0984e3", "📋"), unsafe_allow_html=True)
+    st.markdown(icon_badge("Yeni Teklif", "#6C5CE7", "💰"), unsafe_allow_html=True)
 with colB:
-    st.markdown(icon_badge("Malzeme Hazırlanıyor", "#fdcb6e", "🧰"), unsafe_allow_html=True)
+    st.markdown(icon_badge("İş Emri Hazırlığı", "#0984e3", "📋"), unsafe_allow_html=True)
 with colC:
-    st.markdown(icon_badge("Teslim / Teklif", "#00b894", "🚚"), unsafe_allow_html=True)
+    st.markdown(icon_badge("Malzeme Hazırlanıyor", "#fdcb6e", "🧰"), unsafe_allow_html=True)
 with colD:
     st.markdown(icon_badge("Satın Alma Kuyruğu", "#d63031", "🛒"), unsafe_allow_html=True)
 
@@ -187,7 +189,7 @@ st.divider()
 # ----------------------
 menu = st.sidebar.radio(
     "Menü",
-    ["👥 Cari Hesap", "📋 İş Emri", "📦 Stok", "💰 Teklif", "🛒 Satın Alma", "🚦 Durum Takip"],
+    ["👥 Cari Hesap", "💰 Teklif", "📋 İş Emri", "📦 Stok", "🛒 Satın Alma", "🚦 Durum Takip"],
 )
 
 # ----------------------
@@ -217,14 +219,189 @@ else:
     )
 
 # ----------------------
-# 1) İş Emri
+# 1) Teklif
 # ----------------------
-if menu.startswith("📋"):
+if menu.startswith("💰"):
+    st.header("💰 Teklif Hazırlığı")
+
+    if st.session_state.customer_accounts.empty:
+        st.info("Önce Cari Hesaplar sekmesinden teklif hazırlanacak firmayı ekleyin.")
+    else:
+        customers = st.session_state.customer_accounts["Firma / Cari"].tolist()
+        default_idx = 0
+        if st.session_state.selected_customer in customers:
+            default_idx = customers.index(st.session_state.selected_customer)
+        selected_customer = st.selectbox(
+            "Teklif hazırlanacak cari hesap",
+            customers,
+            index=default_idx,
+        )
+        st.session_state.selected_customer = selected_customer
+
+        # Cari özet bilgisi
+        customer_row = st.session_state.customer_accounts[
+            st.session_state.customer_accounts["Firma / Cari"] == selected_customer
+        ].iloc[0]
+
+        def _display_customer_value(val: object) -> str:
+            if pd.isna(val) or val is None or str(val).strip() == "":
+                return "-"
+            return str(val)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("İlgili Kişi", _display_customer_value(customer_row.get("İlgili Kişi")))
+        with c2:
+            st.metric("Telefon", _display_customer_value(customer_row.get("Telefon")))
+        with c3:
+            st.metric("Statü", _display_customer_value(customer_row.get("Statü")))
+
+        st.divider()
+
+        # Stoktan ürün seçimi
+        st.subheader("Ürün Seçimi")
+        if st.session_state.stock_df.empty:
+            st.warning("Stok verisi yüklenmemiş. Sol menüden Excel yükleyin.")
+        else:
+            with st.expander("📦 Stok listesinden ürün seç", expanded=st.session_state.cart_df.empty):
+                stock_df = st.session_state.stock_df.copy()
+                s1, s2 = st.columns([2, 1])
+                with s1:
+                    stock_query = st.text_input("Ara (ad/kod)", key="quote_stock_search")
+                with s2:
+                    sort_opt = st.selectbox(
+                        "Sırala",
+                        ["name", "stock", "price", "code"],
+                        key="quote_stock_sort",
+                    )
+                if stock_query:
+                    stock_df = stock_df[
+                        stock_df["name"].str.contains(stock_query, case=False, na=False)
+                        | stock_df["code"].str.contains(stock_query, case=False, na=False)
+                    ]
+                stock_df = stock_df.sort_values(sort_opt)
+
+                selection_col = "__select__"
+                qty_col = "__qty__"
+                selection_view = stock_df.copy()
+                selection_view[selection_col] = False
+                selection_view[qty_col] = 1
+
+                edited_stock = st.data_editor(
+                    selection_view,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "price": st.column_config.NumberColumn("price", format="%.2f"),
+                        "stock": st.column_config.NumberColumn("stock", step=1),
+                        selection_col: st.column_config.CheckboxColumn("Seç"),
+                        qty_col: st.column_config.NumberColumn("Adet", min_value=1, step=1),
+                    },
+                    disabled=["code", "name", "unit", "stock", "price"],
+                    key="quote_stock_editor",
+                )
+
+                add_from_stock = st.button("Seçilenleri sepete ekle", type="primary", key="quote_add_btn")
+                if add_from_stock:
+                    if isinstance(edited_stock, pd.DataFrame):
+                        chosen = edited_stock[edited_stock[selection_col]]
+                    else:
+                        chosen = pd.DataFrame(edited_stock)
+                        chosen = chosen[chosen[selection_col]]
+                    if not chosen.empty:
+                        add_df = chosen[["code", "name", "unit", qty_col, "price"]].copy()
+                        add_df.rename(columns={qty_col: "qty"}, inplace=True)
+                        add_df["qty"] = pd.to_numeric(add_df["qty"], errors="coerce").fillna(1).astype(int)
+                        if st.session_state.cart_df.empty:
+                            st.session_state.cart_df = add_df
+                        else:
+                            merged = pd.concat([st.session_state.cart_df, add_df], ignore_index=True)
+                            st.session_state.cart_df = (
+                                merged.groupby(["code", "name", "unit", "price"], as_index=False)["qty"].sum()
+                            )
+                        st.success(f"{len(chosen)} ürün sepete eklendi 🧺")
+                    else:
+                        st.info("Sepete eklemek için en az bir satır seçin.")
+
+        st.divider()
+
+        st.subheader("Teklif Sepeti")
+        if st.session_state.cart_df.empty:
+            st.info("Sepet boş. Üstteki stok listesinden ürün seçin.")
+        else:
+            cart = st.session_state.cart_df.copy()
+            st.caption("Adetleri düzenleyebilirsiniz. Sıfır (0) girerseniz satır silinir.")
+            edited = st.data_editor(
+                cart,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "qty": st.column_config.NumberColumn("qty", min_value=0, step=1),
+                    "price": st.column_config.NumberColumn("price", format="%.2f"),
+                },
+                key="cart_editor",
+            )
+            edited = edited[edited["qty"] > 0]
+            st.session_state.cart_df = edited
+
+            edited["line_total"] = edited["qty"] * edited["price"].fillna(0)
+            total = float(edited["line_total"].sum())
+
+            purchase_rows = []
+            if not st.session_state.stock_df.empty:
+                stock_lookup = st.session_state.stock_df.set_index("code")["stock"].to_dict()
+                for _, r in edited.iterrows():
+                    in_stock = int(stock_lookup.get(r["code"], 0))
+                    need = int(r["qty"]) - in_stock
+                    if need > 0:
+                        purchase_rows.append({
+                            "code": r["code"],
+                            "name": r["name"],
+                            "unit": r["unit"],
+                            "needed_qty": need,
+                        })
+            st.session_state.purchase_df = pd.DataFrame(purchase_rows)
+
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.subheader("Özet")
+                st.metric("Cari", selected_customer)
+                st.metric("Kalem Sayısı", len(edited))
+                st.metric("Toplam Tutar", f"{total:,.2f} ₺")
+            with c2:
+                if not st.session_state.purchase_df.empty:
+                    st.warning("Stok yetersiz kalemler tespit edildi ve Satın Alma listesine eklendi 🛒")
+
+            st.divider()
+            st.subheader("Teklif PDF/Excel Çıktısı")
+            out_buf = io.BytesIO()
+            with pd.ExcelWriter(out_buf, engine="openpyxl") as writer:
+                edited.assign(Cari=selected_customer).to_excel(writer, index=False, sheet_name="Teklif")
+                if not st.session_state.purchase_df.empty:
+                    st.session_state.purchase_df.to_excel(writer, index=False, sheet_name="SatinAlma")
+            out_buf.seek(0)
+            st.download_button(
+                "📄 Teklif & Satın Alma Excel İndir",
+                data=out_buf.read(),
+                file_name=f"teklif_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+
+# ----------------------
+# 2) İş Emri
+# ----------------------
+elif menu.startswith("📋"):
     st.header("📋 Yeni İş Emri")
+    if st.session_state.selected_customer:
+        st.caption(f"Seçili cari: {st.session_state.selected_customer}")
+    if not st.session_state.cart_df.empty:
+        st.caption(f"Teklif sepetinde {len(st.session_state.cart_df)} kalem hazır.")
     with st.form("job_form", clear_on_submit=True):
         c1, c2 = st.columns([2, 1])
         with c1:
-            requester = st.text_input("Talep Eden (Güvenlik Şirketi / Kişi)")
+            requester_default = st.session_state.selected_customer or ""
+            requester = st.text_input("Talep Eden (Güvenlik Şirketi / Kişi)", value=requester_default)
             description = st.text_area("Talep Açıklaması", placeholder="Örn: Kamera kurulum malzemeleri…")
         with c2:
             prio = st.selectbox("Öncelik", ["Normal", "Acil", "Düşük"]) 
@@ -241,7 +418,7 @@ if menu.startswith("📋"):
                 "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
             }
         )
-        st.success("İş emri oluşturuldu. Şimdi Stok'tan malzeme seçebilirsiniz 👉")
+        st.success("İş emri oluşturuldu. Teklif ve stok adımlarından ilerlemeye devam edebilirsiniz 👉")
 
     if st.session_state.job_orders:
         st.subheader("Açık İş Emirleri")
@@ -250,7 +427,7 @@ if menu.startswith("📋"):
         st.info("Henüz iş emri yok. Üstteki formdan ekleyin.")
 
 # ----------------------
-# 2) Stok
+# 3) Stok
 # ----------------------
 elif menu.startswith("📦"):
     st.header("📦 Stok Listesi")
@@ -315,76 +492,6 @@ elif menu.startswith("📦"):
             st.info("Önce en az bir satır seçin.")
 
 # ----------------------
-# 3) Teklif
-# ----------------------
-elif menu.startswith("💰"):
-    st.header("💰 Teklif Sepeti")
-    if st.session_state.cart_df.empty:
-        st.info("Sepet boş. Stok'tan ürün ekleyin.")
-    else:
-        cart = st.session_state.cart_df.copy()
-        # Adet düzenlenebilir
-        st.caption("Adetleri düzenleyebilirsiniz. Sıfır (0) girerseniz satır silinir.")
-        edited = st.data_editor(
-            cart,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "qty": st.column_config.NumberColumn("qty", min_value=0, step=1),
-                "price": st.column_config.NumberColumn("price", format="%.2f"),
-            },
-            key="cart_editor",
-        )
-        # 0 adet olanları at
-        edited = edited[edited["qty"] > 0]
-        st.session_state.cart_df = edited
-
-        # Toplamlar
-        edited["line_total"] = edited["qty"] * edited["price"].fillna(0)
-        total = float(edited["line_total"].sum())
-
-        # Stok kontrol
-        purchase_rows = []
-        if not st.session_state.stock_df.empty:
-            stock_lookup = st.session_state.stock_df.set_index("code")["stock"].to_dict()
-            for _, r in edited.iterrows():
-                in_stock = int(stock_lookup.get(r["code"], 0))
-                need = int(r["qty"]) - in_stock
-                if need > 0:
-                    purchase_rows.append({
-                        "code": r["code"],
-                        "name": r["name"],
-                        "unit": r["unit"],
-                        "needed_qty": need,
-                    })
-        st.session_state.purchase_df = pd.DataFrame(purchase_rows)
-
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.subheader("Özet")
-            st.metric("Kalem Sayısı", len(edited))
-            st.metric("Toplam Tutar", f"{total:,.2f} ₺")
-        with c2:
-            if not st.session_state.purchase_df.empty:
-                st.warning("Stok yetersiz kalemler tespit edildi ve Satın Alma listesine eklendi 🛒")
-
-        st.divider()
-        st.subheader("Teklif PDF/Excel Çıktısı")
-        # Basit Excel çıktısı
-        out_buf = io.BytesIO()
-        with pd.ExcelWriter(out_buf, engine="openpyxl") as writer:
-            edited.to_excel(writer, index=False, sheet_name="Teklif")
-            if not st.session_state.purchase_df.empty:
-                st.session_state.purchase_df.to_excel(writer, index=False, sheet_name="SatinAlma")
-        out_buf.seek(0)
-        st.download_button(
-            "📄 Teklif & Satın Alma Excel İndir",
-            data=out_buf.read(),
-            file_name=f"teklif_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-
 # 4) Cari Hesaplar
 # ----------------------
 elif menu.startswith("👥"):
@@ -474,7 +581,7 @@ elif menu.startswith("🚦"):
         """
         İş akışı:
         
-        **📋 İş Emri** ➜ **🧰 Malzeme Hazırlanıyor** ➜ **🚚 Teslim/Teklif** ➜ **🛒 Satın Alma** ➜ **✅ Tamamlandı**
+        **💰 Teklif** ➜ **📋 İş Emri** ➜ **🧰 Malzeme Hazırlanıyor** ➜ **🚚 Teslim** ➜ **🛒 Satın Alma** ➜ **✅ Tamamlandı**
         
         Her adımda ilgili ekranı kullanarak ilerleyebilirsiniz. Teklifte stok yetersizse kalemler otomatik Satın Alma kuyruğuna düşer.
         """
