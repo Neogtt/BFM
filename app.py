@@ -74,7 +74,7 @@ def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     return df[ordered + other_cols]
 
 
-@@ -52,50 +52,125 @@ def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
+def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
                 df = df.rename(columns={col: "name"})
                 break
     if "stock" not in df.columns:
