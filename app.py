@@ -276,7 +276,7 @@ def generate_quote_pdf(
     font_family = _register_pdf_fonts(pdf)
 
     # Header / Logo area
-        logo_displayed = False
+    logo_displayed = False
     logo_bytes = _load_bfm_logo_bytes()
     if logo_bytes:
         logo_width = 80
