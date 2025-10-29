@@ -479,7 +479,6 @@ if menu.startswith("💰"):
                     format="%.2f",
                     key="labor_cost",
                 )
-                st.session_state.labor_cost = float(labor_cost)
                 grand_total = total + float(labor_cost or 0.0)
                 st.metric("Genel Toplam", f"{grand_total:,.2f} ₺")
             with info_col:
