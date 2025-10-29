@@ -74,6 +74,107 @@ def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     return df[ordered + other_cols]
 
 
+@@ -52,50 +52,125 @@ def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
+                df = df.rename(columns={col: "name"})
+                break
+    if "stock" not in df.columns:
+        for col in df.columns:
+            if any(k in col for k in ["stok", "miktar", "adet", "qty", "mevcut"]):
+                df = df.rename(columns={col: "stock"})
+                break
+
+    # Tip düzeltmeleri
+    if "stock" in df.columns:
+        df["stock"] = pd.to_numeric(df["stock"], errors="coerce").fillna(0).astype(int)
+    if "price" in df.columns:
+        df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
+    if "unit" not in df.columns:
+        df["unit"] = "adet"
+    if "code" not in df.columns:
+        # otomatik kod üret
+        df["code"] = [f"MZ-{i:04d}" for i in range(1, len(df) + 1)]
+
+    # Sütun sırası
+    ordered = ["code", "name", "unit", "stock", "price"]
+    other_cols = [c for c in df.columns if c not in ordered]
+    return df[ordered + other_cols]
+
+
+def _normalize_customer_accounts(df: pd.DataFrame) -> pd.DataFrame:
+    """Cari hesap yüklemelerinde kolonları normalize eder."""
+
+    mapping_sets = {
+        "Firma / Cari": {"firma", "müşteri", "cari", "firma / cari", "firma adı", "cari adı"},
+        "İlgili Kişi": {"ilgili", "ilgili kişi", "yetkili", "kişi", "contact"},
+        "E-posta": {"e-posta", "eposta", "email", "e mail", "mail"},
+        "Telefon": {"telefon", "tel", "gsm", "phone"},
+        "Notlar": {"not", "notlar", "açıklama", "notes"},
+        "Son Teklif Tutarı": {"son teklif", "teklif tutarı", "teklif", "amount", "son teklif tutarı"},
+        "Statü": {"statü", "durum", "status"},
+        "Kayıt Tarihi": {"kayıt", "kayıt tarihi", "oluşturulma", "created", "created at"},
+    }
+
+    renamed = {}
+    for column in df.columns:
+        normalized = str(column).strip().lower()
+        target_col = None
+        for target, options in mapping_sets.items():
+            if normalized in options:
+                target_col = target
+                break
+        if target_col:
+            renamed[column] = target_col
+    if renamed:
+        df = df.rename(columns=renamed)
+
+    result = pd.DataFrame()
+    base_columns = [
+        "Firma / Cari",
+        "İlgili Kişi",
+        "E-posta",
+        "Telefon",
+        "Notlar",
+        "Son Teklif Tutarı",
+        "Statü",
+        "Kayıt Tarihi",
+    ]
+
+    for col in base_columns:
+        if col in df.columns:
+            result[col] = df[col]
+        else:
+            if col == "Son Teklif Tutarı":
+                result[col] = 0.0
+            elif col == "Kayıt Tarihi":
+                result[col] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            else:
+                result[col] = ""
+
+    result["Firma / Cari"] = result["Firma / Cari"].fillna("").astype(str).str.strip()
+    result["İlgili Kişi"] = result["İlgili Kişi"].fillna("").astype(str).str.strip()
+    result["E-posta"] = result["E-posta"].fillna("").astype(str).str.strip()
+    result["Telefon"] = result["Telefon"].fillna("").astype(str).str.strip()
+    result["Notlar"] = result["Notlar"].fillna("").astype(str)
+    result["Statü"] = result["Statü"].fillna("Potansiyel").astype(str).str.strip()
+    result["Son Teklif Tutarı"] = pd.to_numeric(result["Son Teklif Tutarı"], errors="coerce").fillna(0.0)
+
+    def _format_recorded_at(value: object) -> str:
+        if pd.isna(value) or value is None:
+            return datetime.now().strftime("%Y-%m-%d %H:%M")
+        if isinstance(value, str):
+            return value
+        if hasattr(value, "strftime"):
+            try:
+                return value.strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                return str(value)
+        return str(value)
+
+    result["Kayıt Tarihi"] = result["Kayıt Tarihi"].apply(_format_recorded_at)
+
+    return result
+
+
 def _sample_excel() -> bytes:
     """Örnek Excel dosyası üretir (openpyxl varsa)."""
     sample = pd.DataFrame(
@@ -894,6 +995,52 @@ elif menu.startswith("📦"):
 elif menu.startswith("👥"):
     st.header("👥 Cari Hesaplar")
     st.caption("Teklif vereceğiniz müşteri ve firmaları burada saklayın.")
+
+        with st.expander("📤 Excel/CSV'den cari hesap içe aktar", expanded=False):
+        with st.form("customer_import_form"):
+            import_mode = st.radio(
+                "İçe aktarma modu",
+                ["Var olanların üzerine ekle", "Mevcut listeyi sıfırla"],
+                index=0,
+                key="customer_import_mode",
+            )
+            uploaded_accounts = st.file_uploader(
+                "Cari hesap dosyası (.xlsx veya .csv)",
+                type=["xlsx", "csv"],
+                key="customer_import_uploader",
+            )
+            import_submit = st.form_submit_button("İçe Aktar 📁")
+
+        if import_submit:
+            if uploaded_accounts is None:
+                st.warning("Lütfen içe aktarılacak dosyayı seçin.")
+            else:
+                try:
+                    if uploaded_accounts.name.lower().endswith(".csv"):
+                        imported_raw = pd.read_csv(uploaded_accounts)
+                    else:
+                        imported_raw = pd.read_excel(uploaded_accounts)
+
+                    normalized_accounts = _normalize_customer_accounts(imported_raw)
+                    normalized_accounts = normalized_accounts[
+                        normalized_accounts["Firma / Cari"].astype(str).str.strip() != ""
+                    ]
+
+                    if import_mode == "Mevcut listeyi sıfırla":
+                        st.session_state.customer_accounts = normalized_accounts.reset_index(drop=True)
+                    else:
+                        combined = pd.concat(
+                            [st.session_state.customer_accounts, normalized_accounts], ignore_index=True
+                        )
+                        st.session_state.customer_accounts = (
+                            combined.drop_duplicates(subset=["Firma / Cari"], keep="last").reset_index(drop=True)
+                        )
+
+                    st.success(
+                        f"{len(normalized_accounts)} cari hesap içe aktarıldı."
+                    )
+                except Exception as exc:
+                    st.error(f"Cari hesaplar içe aktarılırken hata oluştu: {exc}")
 
     with st.form("customer_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
