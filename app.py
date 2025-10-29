@@ -74,32 +74,6 @@ def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     return df[ordered + other_cols]
 
 
-def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
-                df = df.rename(columns={col: "name"})
-                break
-    if "stock" not in df.columns:
-        for col in df.columns:
-            if any(k in col for k in ["stok", "miktar", "adet", "qty", "mevcut"]):
-                df = df.rename(columns={col: "stock"})
-                break
-
-    # Tip düzeltmeleri
-    if "stock" in df.columns:
-        df["stock"] = pd.to_numeric(df["stock"], errors="coerce").fillna(0).astype(int)
-    if "price" in df.columns:
-        df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
-    if "unit" not in df.columns:
-        df["unit"] = "adet"
-    if "code" not in df.columns:
-        # otomatik kod üret
-        df["code"] = [f"MZ-{i:04d}" for i in range(1, len(df) + 1)]
-
-    # Sütun sırası
-    ordered = ["code", "name", "unit", "stock", "price"]
-    other_cols = [c for c in df.columns if c not in ordered]
-    return df[ordered + other_cols]
-
-
 def _normalize_customer_accounts(df: pd.DataFrame) -> pd.DataFrame:
     """Cari hesap yüklemelerinde kolonları normalize eder."""
 
@@ -173,7 +147,6 @@ def _normalize_customer_accounts(df: pd.DataFrame) -> pd.DataFrame:
     result["Kayıt Tarihi"] = result["Kayıt Tarihi"].apply(_format_recorded_at)
 
     return result
-
 
 def _sample_excel() -> bytes:
     """Örnek Excel dosyası üretir (openpyxl varsa)."""
