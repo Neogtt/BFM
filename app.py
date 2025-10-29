@@ -208,7 +208,7 @@ if x_file is not None:
         st.sidebar.error(f"Excel okunamadı: {e}")
 else:
     data, fname, mime, label = get_sample_download()
-st.sidebar.download_button(
+    st.sidebar.download_button(
         label=label,
         data=data,
         file_name=fname,
