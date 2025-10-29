@@ -336,7 +336,7 @@ def generate_quote_pdf(
     pdf_content = pdf.output(dest="S")
     if isinstance(pdf_content, str):
         return pdf_content.encode("latin-1")
-    return pdf_content
+    return bytes(pdf_content)
 
 # ----------------------
 # Teklif Yönetim Yardımcıları
